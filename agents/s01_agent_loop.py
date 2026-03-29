@@ -29,7 +29,7 @@ import subprocess
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+load_dotenv(override=Truee)
 
 if os.getenv("ANTHROPIC_BASE_URL"):
     os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
