@@ -49,11 +49,11 @@ from queue import Queue
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+load_dotenv(override=True)  # 解析.env，若和系统变量名重复，覆盖系统变量
 if os.getenv("ANTHROPIC_BASE_URL"):
     os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
 
-WORKDIR = Path.cwd()
+WORKDIR = Path.cwd()  # 当前文件目录作为工作目录
 client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
 MODEL = os.environ["MODEL_ID"]
 

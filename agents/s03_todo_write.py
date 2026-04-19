@@ -49,11 +49,11 @@ Prefer tools over prose."""
 
 
 # -- TodoManager: structured state the LLM writes to --
-class TodoManager:
+class TodoManager:  # 任务管理器
     def __init__(self):
         self.items = []
 
-    def update(self, items: list) -> str:
+    def update(self, items: list) -> str:  # 更新任务状态，只允许一个任务运行
         if len(items) > 20:
             raise ValueError("Max 20 todos allowed")
         validated = []
@@ -74,7 +74,7 @@ class TodoManager:
         self.items = validated
         return self.render()
 
-    def render(self) -> str:
+    def render(self) -> str:  # 当前任务状态打印格式
         if not self.items:
             return "No todos."
         lines = []
@@ -86,11 +86,11 @@ class TodoManager:
         return "\n".join(lines)
 
 
-TODO = TodoManager()
+TODO = TodoManager()  # 任务管理器
 
 
 # -- Tool implementations --
-def safe_path(p: str) -> Path:
+def safe_path(p: str) -> Path:  # 沙箱约束
     path = (WORKDIR / p).resolve()
     if not path.is_relative_to(WORKDIR):
         raise ValueError(f"Path escapes workspace: {p}")
