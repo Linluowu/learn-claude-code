@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
+# 指定脚本解释器为 python3
+
 # Harness: protocols -- structured handshakes between models.
+# Harness：协议 —— 模型之间的结构化握手。
+# 本文件在 s09 团队系统的基础上引入两种协议：关闭协议和计划审批协议。
+# 两种协议都使用相同的 request_id 关联模式。
+
 """
 s10_team_protocols.py - Team Protocols
 
+s10_team_protocols.py - 团队协议
+
 Shutdown protocol and plan approval protocol, both using the same
 request_id correlation pattern. Builds on s09's team messaging.
+
+关闭协议和计划审批协议，两者使用相同的 request_id 关联模式。
+建立在 s09 的团队消息系统之上。
 
     Shutdown FSM: pending -> approved | rejected
 
@@ -45,32 +56,65 @@ request_id correlation pattern. Builds on s09's team messaging.
     Trackers: {request_id: {"target|from": name, "status": "pending|..."}}
 
 Key insight: "Same request_id correlation pattern, two domains."
+
+核心洞察："相同的 request_id 关联模式，两个不同的领域。"
 """
 
 import json
+# 导入 json 模块
+
 import os
+# 导入 os 模块
+
 import subprocess
+# 导入 subprocess 模块
+
 import threading
+# 导入 threading 模块，用于多线程
+
 import time
+# 导入 time 模块
+
 import uuid
+# 导入 uuid 模块，用于生成唯一 request_id
+
 from pathlib import Path
+# 从 pathlib 导入 Path
 
 from anthropic import Anthropic
+# 从 anthropic 导入 Anthropic
+
 from dotenv import load_dotenv
+# 从 python-dotenv 导入 load_dotenv
 
 load_dotenv(override=True)
+# 加载环境变量
+
 if os.getenv("ANTHROPIC_BASE_URL"):
+    # 检查自定义 base URL
     os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
+    # 移除认证令牌
 
 WORKDIR = Path.cwd()
+# 设置工作目录
+
 client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
+# 创建 Anthropic 客户端
+
 MODEL = os.environ["MODEL_ID"]
+# 读取模型 ID
+
 TEAM_DIR = WORKDIR / ".team"
+# 团队配置目录
+
 INBOX_DIR = TEAM_DIR / "inbox"
+# 收件箱目录
 
 SYSTEM = f"You are a team lead at {WORKDIR}. Manage teammates with shutdown and plan approval protocols."
+# 队长系统提示词：管理队友，使用关闭和计划审批协议
 
 VALID_MSG_TYPES = {
+    # 有效的消息类型
     "message",
     "broadcast",
     "shutdown_request",
@@ -79,12 +123,21 @@ VALID_MSG_TYPES = {
 }
 
 # -- Request trackers: correlate by request_id --
+# -- 请求追踪器：通过 request_id 关联 --
 shutdown_requests = {}
+# shutdown_requests：字典，存储关闭请求的状态
+# 键：request_id，值：{"target": 目标队友, "status": "pending|approved|rejected"}
+
 plan_requests = {}
+# plan_requests：字典，存储计划审批请求的状态
+# 键：request_id，值：{"from": 提交者, "plan": 计划内容, "status": "pending|approved|rejected"}
+
 _tracker_lock = threading.Lock()
+# _tracker_lock：线程锁，保护对请求追踪器的并发访问
 
 
 # -- MessageBus: JSONL inbox per teammate --
+# -- MessageBus：每个队友的 JSONL 收件箱（与 s09 相同）--
 class MessageBus:
     def __init__(self, inbox_dir: Path):
         self.dir = inbox_dir
@@ -131,6 +184,7 @@ BUS = MessageBus(INBOX_DIR)
 
 
 # -- TeammateManager with shutdown + plan approval --
+# -- TeammateManager：增加了关闭和计划审批功能 --
 class TeammateManager:
     def __init__(self, team_dir: Path):
         self.dir = team_dir
@@ -179,15 +233,19 @@ class TeammateManager:
             f"Submit plans via plan_approval before major work. "
             f"Respond to shutdown_request with shutdown_response."
         )
+        # 队友系统提示词：增加了计划审批和关闭响应的要求
         messages = [{"role": "user", "content": prompt}]
         tools = self._teammate_tools()
         should_exit = False
+        # should_exit：标记是否应该退出循环
         for _ in range(50):
             inbox = BUS.read_inbox(name)
             for msg in inbox:
                 messages.append({"role": "user", "content": json.dumps(msg)})
             if should_exit:
+                # 如果标记为应该退出
                 break
+                # 跳出循环
             try:
                 response = client.messages.create(
                     model=MODEL,
@@ -212,11 +270,14 @@ class TeammateManager:
                         "content": str(output),
                     })
                     if block.name == "shutdown_response" and block.input.get("approve"):
+                        # 如果队友批准了关闭请求
                         should_exit = True
+                        # 标记应该退出
             messages.append({"role": "user", "content": results})
         member = self._find_member(name)
         if member:
             member["status"] = "shutdown" if should_exit else "idle"
+            # 根据 should_exit 设置状态
             self._save_config()
 
     def _exec(self, sender: str, tool_name: str, args: dict) -> str:
@@ -235,24 +296,35 @@ class TeammateManager:
             return json.dumps(BUS.read_inbox(sender), indent=2)
         if tool_name == "shutdown_response":
             req_id = args["request_id"]
+            # 提取请求 ID
             approve = args["approve"]
+            # 提取是否批准
             with _tracker_lock:
+                # 获取锁
                 if req_id in shutdown_requests:
+                    # 如果请求存在
                     shutdown_requests[req_id]["status"] = "approved" if approve else "rejected"
+                    # 更新请求状态
             BUS.send(
                 sender, "lead", args.get("reason", ""),
                 "shutdown_response", {"request_id": req_id, "approve": approve},
             )
+            # 发送关闭响应给队长
             return f"Shutdown {'approved' if approve else 'rejected'}"
         if tool_name == "plan_approval":
             plan_text = args.get("plan", "")
+            # 获取计划文本
             req_id = str(uuid.uuid4())[:8]
+            # 生成唯一请求 ID
             with _tracker_lock:
+                # 获取锁
                 plan_requests[req_id] = {"from": sender, "plan": plan_text, "status": "pending"}
+                # 记录计划请求
             BUS.send(
                 sender, "lead", plan_text, "plan_approval_response",
                 {"request_id": req_id, "plan": plan_text},
             )
+            # 发送计划审批请求给队长
             return f"Plan submitted (request_id={req_id}). Waiting for lead approval."
         return f"Unknown tool: {tool_name}"
 
@@ -273,8 +345,10 @@ class TeammateManager:
              "input_schema": {"type": "object", "properties": {}}},
             {"name": "shutdown_response", "description": "Respond to a shutdown request. Approve to shut down, reject to keep working.",
              "input_schema": {"type": "object", "properties": {"request_id": {"type": "string"}, "approve": {"type": "boolean"}, "reason": {"type": "string"}}, "required": ["request_id", "approve"]}},
+            # shutdown_response 工具：响应关闭请求
             {"name": "plan_approval", "description": "Submit a plan for lead approval. Provide plan text.",
              "input_schema": {"type": "object", "properties": {"plan": {"type": "string"}}, "required": ["plan"]}},
+            # plan_approval 工具：提交计划给队长审批
         ]
 
     def list_all(self) -> str:
@@ -348,37 +422,63 @@ def _run_edit(path: str, old_text: str, new_text: str) -> str:
 
 
 # -- Lead-specific protocol handlers --
+# -- 队长专用协议处理器 --
 def handle_shutdown_request(teammate: str) -> str:
+    # handle_shutdown_request 函数：向队友发送关闭请求
+    # 参数 teammate: str —— 目标队友名称
+    # 返回值 -> str —— 请求结果
     req_id = str(uuid.uuid4())[:8]
+    # 生成唯一请求 ID（取前8个字符）
     with _tracker_lock:
+        # 获取锁
         shutdown_requests[req_id] = {"target": teammate, "status": "pending"}
+        # 记录关闭请求，状态为 pending
     BUS.send(
         "lead", teammate, "Please shut down gracefully.",
         "shutdown_request", {"request_id": req_id},
     )
+    # 发送关闭请求消息给队友
     return f"Shutdown request {req_id} sent to '{teammate}' (status: pending)"
 
 
 def handle_plan_review(request_id: str, approve: bool, feedback: str = "") -> str:
+    # handle_plan_review 函数：处理计划审批
+    # 参数 request_id: str —— 计划请求 ID
+    # 参数 approve: bool —— 是否批准
+    # 参数 feedback: str = "" —— 反馈信息，可选
+    # 返回值 -> str —— 审批结果
     with _tracker_lock:
+        # 获取锁
         req = plan_requests.get(request_id)
+        # 查找计划请求
     if not req:
+        # 如果请求不存在
         return f"Error: Unknown plan request_id '{request_id}'"
+        # 返回错误
     with _tracker_lock:
+        # 获取锁
         req["status"] = "approved" if approve else "rejected"
+        # 更新请求状态
     BUS.send(
         "lead", req["from"], feedback, "plan_approval_response",
         {"request_id": request_id, "approve": approve, "feedback": feedback},
     )
+    # 发送审批响应给提交者
     return f"Plan {req['status']} for '{req['from']}'"
 
 
 def _check_shutdown_status(request_id: str) -> str:
+    # _check_shutdown_status 函数：查询关闭请求状态
+    # 参数 request_id: str —— 关闭请求 ID
+    # 返回值 -> str —— 状态 JSON 字符串
     with _tracker_lock:
+        # 获取锁
         return json.dumps(shutdown_requests.get(request_id, {"error": "not found"}))
+        # 返回请求状态，如果不存在返回错误
 
 
 # -- Lead tool dispatch (12 tools) --
+# -- 队长工具调度（12 个工具）--
 TOOL_HANDLERS = {
     "bash":              lambda **kw: _run_bash(kw["command"]),
     "read_file":         lambda **kw: _run_read(kw["path"], kw.get("limit")),
@@ -390,8 +490,11 @@ TOOL_HANDLERS = {
     "read_inbox":        lambda **kw: json.dumps(BUS.read_inbox("lead"), indent=2),
     "broadcast":         lambda **kw: BUS.broadcast("lead", kw["content"], TEAM.member_names()),
     "shutdown_request":  lambda **kw: handle_shutdown_request(kw["teammate"]),
+    # shutdown_request 工具：发送关闭请求
     "shutdown_response": lambda **kw: _check_shutdown_status(kw.get("request_id", "")),
+    # shutdown_response 工具：查询关闭请求状态
     "plan_approval":     lambda **kw: handle_plan_review(kw["request_id"], kw["approve"], kw.get("feedback", "")),
+    # plan_approval 工具：审批计划
 }
 
 # these base tools are unchanged from s02
@@ -416,10 +519,13 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]}},
     {"name": "shutdown_request", "description": "Request a teammate to shut down gracefully. Returns a request_id for tracking.",
      "input_schema": {"type": "object", "properties": {"teammate": {"type": "string"}}, "required": ["teammate"]}},
+    # shutdown_request 工具定义
     {"name": "shutdown_response", "description": "Check the status of a shutdown request by request_id.",
      "input_schema": {"type": "object", "properties": {"request_id": {"type": "string"}}, "required": ["request_id"]}},
+    # shutdown_response 工具定义
     {"name": "plan_approval", "description": "Approve or reject a teammate's plan. Provide request_id + approve + optional feedback.",
      "input_schema": {"type": "object", "properties": {"request_id": {"type": "string"}, "approve": {"type": "boolean"}, "feedback": {"type": "string"}}, "required": ["request_id", "approve"]}},
+    # plan_approval 工具定义
 ]
 
 
