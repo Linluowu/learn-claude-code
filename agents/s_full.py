@@ -275,7 +275,7 @@ class TodoManager:
     # TodoManager 类：管理待办事项列表
     def __init__(self):
         # 构造函数
-        logging.info("【log】初始化待办列表")
+        logging.info("【log】初始化todo")
         self.items = []
         # 待办事项列表
 
@@ -284,7 +284,7 @@ class TodoManager:
         # 参数 items: list —— 模型传入的新待办事项列表
         # 返回值 -> str —— 渲染后的待办事项列表
         validated, ip = [], 0
-        logging.info("【log】更新待办任务")
+        logging.info("【log】更新todo")
         # validated：验证通过的列表，ip：进行中计数
         for i, item in enumerate(items):
             # 遍历每个待办事项
@@ -295,15 +295,15 @@ class TodoManager:
             af = str(item.get("activeForm", "")).strip()
             # 提取 activeForm（进行中的描述）
             if not content:
-                logging.error("【log】部分待办任务无内容")
+                logging.error("【log】部分todo无内容")
                 raise ValueError(f"Item {i}: content required")
             # 内容不能为空
             if status not in ("pending", "in_progress", "completed"):
-                logging.error("【log】部分待办任务状态异常")
+                logging.error("【log】部分todo状态异常")
                 raise ValueError(f"Item {i}: invalid status '{status}'")
             # 状态必须有效
             if not af:
-                logging.error("【log】部分待办任务进行描述为空")
+                logging.error("【log】部分todo进行描述为空")
                 raise ValueError(f"Item {i}: activeForm required")
             # activeForm 不能为空
             if status == "in_progress": ip += 1
@@ -311,11 +311,11 @@ class TodoManager:
             validated.append({"content": content, "status": status, "activeForm": af})
             # 添加到验证列表
         if len(validated) > 20:
-            logging.error("【log】待办任务数量超限")
+            logging.error("【log】todo数量超限")
             raise ValueError("Max 20 todos")
         # 最多 20 个待办事项
         if ip > 1:
-            logging.error("【log】进行中任务超限")
+            logging.error("【log】进行中todo超限")
             raise ValueError("Only one in_progress allowed")
         # 只能有一个进行中的任务
         self.items = validated
@@ -327,12 +327,12 @@ class TodoManager:
         # render 方法：渲染待办事项列表
         # 返回值 -> str —— 格式化字符串
         if not self.items:
-            logging.info("【log】当前无待办任务")
+            logging.info("【log】当前无todo")
             return "No todos."
         # 空列表
         lines = []
         # 输出行列表
-        logging.info("【log】当前待办任务如下：")
+        logging.info("【log】当前todo如下：")
         for item in self.items:
             m = {"completed": "[x]", "in_progress": "[>]", "pending": "[ ]"}.get(item["status"], "[?]")
             # 根据状态选择标记
@@ -343,10 +343,10 @@ class TodoManager:
         done = sum(1 for t in self.items if t["status"] == "completed")
         # 统计已完成数量
         lines.append(f"\n({done}/{len(self.items)} completed)")
-        logging.info("【log】待办任务进度：%s/%s 已完成", done, len(self.items))
+        logging.info("【log】todo进度：%s/%s 已完成", done, len(self.items))
         # 添加进度统计
         result = "\n".join(lines)
-        logging.info("【log】更新后待办任务状态：\n%s", result)
+        logging.info("【log】更新后todo状态：\n%s", result)
         return result
         # 返回格式化字符串
 
@@ -396,7 +396,7 @@ def run_subagent(prompt: str, agent_type: str = "Explore") -> str:
         resp = client.messages.create(model=MODEL, messages=sub_msgs, tools=sub_tools, max_tokens=8000)
         # 调用 Claude API
         sub_msgs.append({"role": "assistant", "content": resp.content})
-        logging.info("【log】子agent响应内容：%s", resp.content)
+        logging.info("【log】子agent响应内容：%s", str(resp.content)[:300])
         # 追加模型回复
         if resp.stop_reason != "tool_use":
             # 如果没有调用工具
@@ -413,13 +413,17 @@ def run_subagent(prompt: str, agent_type: str = "Explore") -> str:
                 logging.info("【log】子agent调用工具%s：", b.name)
                 # 查找处理函数
                 results.append({"type": "tool_result", "tool_use_id": b.id, "content": str(h(**b.input))[:50000]})
+                logging.info("【log】子agent调用工具结果：%s", results[-1])
                 # 执行工具并构建结果
         sub_msgs.append({"role": "user", "content": results})
         # 追加结果
     if resp:
         # 如果有响应
-        return "".join(b.text for b in resp.content if hasattr(b, "text")) or "(no summary)"
+        sub_final_reps = "".join(b.text for b in resp.content if hasattr(b, "text")) or "(no summary)"
+        logging.info("【log】子agent最终响应：%s", sub_final_reps)
+        return sub_final_reps
         # 提取所有文本并返回
+    logging.info("【log】子agent响应失败")
     return "(subagent failed)"
     # 失败则返回错误信息
 
@@ -429,12 +433,14 @@ def run_subagent(prompt: str, agent_type: str = "Explore") -> str:
 class SkillLoader:
     # SkillLoader 类：扫描并加载技能
     def __init__(self, skills_dir: Path):
+        logging.info("【log】初始化skill列表")
         # 构造函数
         # 参数 skills_dir: Path —— 技能目录
         self.skills = {}
         # 技能字典
         if skills_dir.exists():
             # 如果目录存在
+            skill_names = []
             for f in sorted(skills_dir.rglob("SKILL.md")):
                 # 遍历所有 SKILL.md 文件
                 text = f.read_text()
@@ -459,6 +465,10 @@ class SkillLoader:
                 # 获取技能名称
                 self.skills[name] = {"meta": meta, "body": body}
                 # 保存技能
+                skill_names.append(name)
+            logging.info("【log】初始化技能完成，共加载 %s 个技能：%s", len(skill_names), ", ".join(skill_names))
+        else:
+            logging.info("【log】当前无skill")
 
     def descriptions(self) -> str:
         # descriptions 方法：生成技能描述列表
@@ -474,8 +484,12 @@ class SkillLoader:
         # 返回值 -> str —— 技能的完整内容
         s = self.skills.get(name)
         # 查找技能
-        if not s: return f"Error: Unknown skill '{name}'. Available: {', '.join(self.skills.keys())}"
+        logging.info("【log】尝试加载技能：%s", name)
+        if not s:
+            logging.info("【log】当前无此技能：%s", name)
+            return f"Error: Unknown skill '{name}'. Available: {', '.join(self.skills.keys())}"
         # 未找到则返回错误
+        logging.info("【log】加载技能%s成功", name)
         return f"<skill name=\"{name}\">\n{s['body']}\n</skill>"
         # 返回包装在 XML 标签中的技能内容
 
@@ -513,6 +527,7 @@ def microcompact(messages: list):
         if isinstance(part.get("content"), str) and len(part["content"]) > 100:
             # 如果内容是字符串且长度超过 100
             part["content"] = "[cleared]"
+            logging.info("【log】压缩对话中工具调用结果，只保留最近3个调用，其余用cleared占位替换")
             # 替换为占位符
 
 def auto_compact(messages: list) -> list:
@@ -538,6 +553,7 @@ def auto_compact(messages: list) -> list:
     )
     # 调用 Claude API 生成摘要
     summary = resp.content[0].text
+    logging.info("【log】压缩历史对话后得到摘要：%s", summary)
     # 提取摘要文本
     return [
         {"role": "user", "content": f"[Compressed. Transcript: {path}]\n{summary}"},
@@ -550,6 +566,7 @@ def auto_compact(messages: list) -> list:
 class TaskManager:
     # TaskManager 类：管理持久化任务
     def __init__(self):
+        logging.info("【log】初始化task")
         # 构造函数
         TASKS_DIR.mkdir(exist_ok=True)
         # 创建任务目录
@@ -567,9 +584,13 @@ class TaskManager:
         # 参数 tid: int —— 任务 ID
         # 返回值 -> dict —— 任务字典
         p = TASKS_DIR / f"task_{tid}.json"
+        logging.info("【log】加载task_%s", tid)
         # 构建文件路径
-        if not p.exists(): raise ValueError(f"Task {tid} not found")
+        if not p.exists():
+            logging.error("【log】不存在相关task")
+            raise ValueError(f"Task {tid} not found")
         # 不存在则抛出错误
+        logging.info("【log】task内容加载成功")
         return json.loads(p.read_text())
         # 读取并解析 JSON
 
@@ -588,6 +609,7 @@ class TaskManager:
                 "status": "pending", "owner": None, "blockedBy": []}
         # 构建任务字典
         self._save(task)
+        logging.info("【log】新建并保存task_%s，标题：%s, 详情：%s", task[id], subject, description)
         # 保存
         return json.dumps(task, indent=2)
         # 返回 JSON
@@ -596,6 +618,7 @@ class TaskManager:
         # get 方法：获取任务详情
         # 参数 tid: int —— 任务 ID
         # 返回值 -> str —— 任务 JSON 字符串
+        logging.info("【log】加载task_%s内容", tid)
         return json.dumps(self._load(tid), indent=2)
 
     def update(self, tid: int, status: str = None,
@@ -607,6 +630,7 @@ class TaskManager:
         # 参数 remove_blocked_by: list = None —— 要移除的阻塞任务
         # 返回值 -> str —— 更新后的 JSON
         task = self._load(tid)
+        logging.info("【log】更新task_%s", tid)
         # 加载任务
         if status:
             # 如果提供了新状态
@@ -624,19 +648,23 @@ class TaskManager:
                         # 移除阻塞关系
                         self._save(t)
                         # 保存更新
+                        logging.info("【log】移除task_%s对其他task阻塞", tid)
             if status == "deleted":
                 # 如果删除
                 (TASKS_DIR / f"task_{tid}.json").unlink(missing_ok=True)
                 # 删除文件
+                logging.info("删除task_%s", tid)
                 return f"Task {tid} deleted"
                 # 返回结果
         if add_blocked_by:
             # 如果添加阻塞
             task["blockedBy"] = list(set(task["blockedBy"] + add_blocked_by))
+            logging.info("【log】为task_%s添加阻塞", tid)
             # 合并并去重
         if remove_blocked_by:
             # 如果移除阻塞
             task["blockedBy"] = [x for x in task["blockedBy"] if x not in remove_blocked_by]
+            logging.info("【log】为task_%s移除阻塞", tid)
             # 过滤
         self._save(task)
         # 保存
@@ -647,7 +675,9 @@ class TaskManager:
         # 返回值 -> str —— 格式化的任务列表
         tasks = [json.loads(f.read_text()) for f in sorted(TASKS_DIR.glob("task_*.json"))]
         # 读取所有任务
-        if not tasks: return "No tasks."
+        if not tasks:
+            logging.info("【log】当前全量task：空")
+            return "No tasks."
         # 空列表
         lines = []
         # 输出行
@@ -660,7 +690,9 @@ class TaskManager:
             # 阻塞信息
             lines.append(f"{m} #{t['id']}: {t['subject']}{owner}{blocked}")
             # 格式化行
-        return "\n".join(lines)
+        task_lines = "\n".join(lines)
+        logging.info("【log】当前全量task：%s", task_lines)
+        return task_lines
         # 返回格式化列表
 
     def claim(self, tid: int, owner: str) -> str:
@@ -675,6 +707,7 @@ class TaskManager:
         task["status"] = "in_progress"
         # 更新状态为进行中
         self._save(task)
+        logging.info("【log】task_%s由%s认领并开始进行", tid, owner)
         # 保存
         return f"Claimed task #{tid} for {owner}"
         # 返回结果
@@ -686,6 +719,7 @@ class BackgroundManager:
     # BackgroundManager 类：管理后台任务的执行
     def __init__(self):
         # 构造函数
+        logging.info("【log】初始化线程管理器")
         self.tasks = {}
         # 任务字典，存储所有后台任务
         self.notifications = Queue()
@@ -710,6 +744,7 @@ class BackgroundManager:
         # 参数 tid: str —— 任务 ID
         # 参数 command: str —— 命令
         # 参数 timeout: int —— 超时时间
+        logging.info("【log】启动线程%s执行%s", tid, command)
         try:
             r = subprocess.run(command, shell=True, cwd=WORKDIR,
                                capture_output=True, text=True, timeout=timeout)
@@ -718,36 +753,55 @@ class BackgroundManager:
             # 捕获输出
             self.tasks[tid].update({"status": "completed", "result": output or "(no output)"})
             # 更新状态为已完成
+            logging.info("【log】线程执行成功并更新状态")
         except Exception as e:
             # 异常
             self.tasks[tid].update({"status": "error", "result": str(e)})
             # 更新状态为错误
-        self.notifications.put({"task_id": tid, "status": self.tasks[tid]["status"],
-                                "result": self.tasks[tid]["result"][:500]})
+            logging.error("【log】线程执行异常并更新状态")
+        notification = {
+            "task_id": tid,
+            "status": self.tasks[tid]["status"],
+            "result": self.tasks[tid]["result"][:500]
+        }
+        self.notifications.put(notification)
         # 向通知队列添加通知
+        logging.info("【log】通知队列添加通知:%s，线程结束", notification)
 
     def check(self, tid: str = None) -> str:
         # check 方法：查询任务状态
         # 参数 tid: str = None —— 任务 ID
         # 返回值 -> str —— 状态信息
+        logging.info("【log】开始查询线程状态，传入线程ID：%s", tid if tid else "全部")
         if tid:
             # 如果指定了任务 ID
             t = self.tasks.get(tid)
             # 查找任务
-            return f"[{t['status']}] {t.get('result') or '(running)'}" if t else f"Unknown: {tid}"
-            # 返回状态
-        return "\n".join(f"{k}: [{v['status']}] {v['command'][:60]}" for k, v in self.tasks.items()) or "No bg tasks."
+            if t:
+                res = f"[{t['status']}] {t.get('result') or '(running)'}"
+                logging.info("【log】线程 %s 状态：%s", tid, t['status'])
+                return res
+            else:
+                logging.warning("【log】未找到线程：%s", tid)
+                return f"Unknown: {tid}"
+        task_list = [f"{k}: [{v['status']}] {v['command'][:60]}" for k, v in self.tasks.items()]
+        task_count = len(self.tasks)
+        logging.info("【log】查询全部线程，总线程数：%s", task_count)
+        
+        return "\n".join(task_list) if task_list else "No bg tasks."
         # 返回所有任务
 
     def drain(self) -> list:
         # drain 方法：清空并返回所有通知
         # 返回值 -> list —— 通知列表
+        logging.info("【log】开始获取->清空线程通知队列")
         notifs = []
         # 通知列表
         while not self.notifications.empty():
             # 当队列不为空时
             notifs.append(self.notifications.get_nowait())
             # 获取通知
+        logging.info("【log】获取->清空线程通知队列完成，共获取通知数量：%s", len(notifs))
         return notifs
         # 返回列表
 
@@ -757,6 +811,7 @@ class BackgroundManager:
 class MessageBus:
     # MessageBus 类：管理队友间的消息发送和接收
     def __init__(self):
+        logging.info("【log】初始化信箱路由")
         # 构造函数
         INBOX_DIR.mkdir(parents=True, exist_ok=True)
         # 创建收件箱目录
@@ -770,15 +825,24 @@ class MessageBus:
         # 参数 msg_type: str = "message" —— 消息类型
         # 参数 extra: dict = None —— 额外字段
         # 返回值 -> str —— 发送结果
+        logging.info("【log】开始发送消息 | 发送者: %s | 接收者: %s | 类型: %s",
+                 sender, to, msg_type)
         msg = {"type": msg_type, "from": sender, "content": content,
                "timestamp": time.time()}
         # 构建消息字典
-        if extra: msg.update(extra)
+        if extra:
+            logging.info("【log】消息包含额外参数: %s", extra)
+            msg.update(extra)
         # 合并额外字段
-        with open(INBOX_DIR / f"{to}.jsonl", "a") as f:
-            # 打开收件箱文件（追加模式）
-            f.write(json.dumps(msg) + "\n")
-            # 写入 JSONL
+        try:
+            with open(INBOX_DIR / f"{to}.jsonl", "a") as f:
+                # 打开收件箱文件（追加模式）
+                f.write(json.dumps(msg) + "\n")
+                # 写入 JSONL
+                logging.info("【log】消息发送成功 → 已写入 %s.jsonl", to)
+        except Exception as e:
+            logging.error("【log】消息发送失败: %s", str(e))
+            return f"Error: 发送消息失败 - {str(e)}"
         return f"Sent {msg_type} to {to}"
         # 返回结果
 
@@ -787,15 +851,18 @@ class MessageBus:
         # 参数 name: str —— 队友名称
         # 返回值 -> list —— 消息列表
         path = INBOX_DIR / f"{name}.jsonl"
-        # 构建文件路径
-        if not path.exists(): return []
-        # 不存在则返回空列表
+        logging.info("【log】开始读取并清空收件箱：%s", path)
+
+        if not path.exists():
+            logging.info("【log】收件箱文件不存在，返回空列表")
+            return []
         msgs = [json.loads(l) for l in path.read_text().strip().splitlines() if l]
+        logging.info("【log】成功读取 %s 条消息", len(msgs))
         # 读取并解析所有消息
         path.write_text("")
+        logging.info("【log】收件箱已清空")
         # 清空文件
         return msgs
-        # 返回消息列表
 
     def broadcast(self, sender: str, content: str, names: list) -> str:
         # broadcast 方法：广播消息
@@ -805,6 +872,7 @@ class MessageBus:
         # 返回值 -> str —— 广播结果
         count = 0
         # 计数器
+        logging.info("【log】开始广播消息 | 发送者: %s | 接收列表: %s", sender, names)
         for n in names:
             # 遍历所有队友
             if n != sender:
@@ -813,6 +881,7 @@ class MessageBus:
                 # 发送广播
                 count += 1
                 # 计数
+        logging.info("【log】广播完成，共发送给 %s 名队友", count)
         return f"Broadcast to {count} teammates"
         # 返回结果
 
@@ -823,6 +892,7 @@ shutdown_requests = {}
 # 关闭请求追踪器
 plan_requests = {}
 # 计划请求追踪器
+logging.info("【log】初始化关闭、计划请求追踪器")
 
 
 # === SECTION: team (s09/s11) ===
@@ -830,6 +900,7 @@ plan_requests = {}
 class TeammateManager:
     # TeammateManager 类：管理队友的创建和生命周期
     def __init__(self, bus: MessageBus, task_mgr: TaskManager):
+        logging.info("【log】初始化team leader")
         # 构造函数
         # 参数 bus: MessageBus —— 消息总线
         # 参数 task_mgr: TaskManager —— 任务管理器
@@ -849,15 +920,19 @@ class TeammateManager:
     def _load(self) -> dict:
         # _load 方法：加载配置
         # 返回值 -> dict —— 配置字典
+        logging.info("【log】加载团队配置文件：%s", self.config_path)
         if self.config_path.exists():
             # 如果文件存在
+            logging.info("【log】配置文件加载成功 | 团队名称: %s | 成员: %s", self.config.get("team_name"), self.config.get("members", []))
             return json.loads(self.config_path.read_text())
             # 读取并解析
+        logging.info("【log】配置文件不存在，使用默认配置")
         return {"team_name": "default", "members": []}
         # 返回默认配置
 
     def _save(self):
         # _save 方法：保存配置
+        logging.info("【log】保存团队配置")
         self.config_path.write_text(json.dumps(self.config, indent=2))
         # 写入文件
 
@@ -865,37 +940,45 @@ class TeammateManager:
         # _find 方法：查找队友
         # 参数 name: str —— 队友名称
         # 返回值 -> dict —— 队友字典，不存在返回 None
+        logging.info("【log】开始查找团队成员: %s", name)
         for m in self.config["members"]:
             # 遍历所有成员
-            if m["name"] == name: return m
+            if m["name"] == name:
+                logging.info("【log】找到成员: %s", name)
+                return m
             # 找到则返回
+        logging.info("【log】未找到成员: %s", name)
         return None
         # 未找到
 
     def spawn(self, name: str, role: str, prompt: str) -> str:
-        # spawn 方法：创建队友
+        # spawn 方法：创建/唤醒队友
         # 参数 name: str —— 队友名称
         # 参数 role: str —— 角色
         # 参数 prompt: str —— 初始提示词
         # 返回值 -> str —— 创建结果
+        logging.info("【log】尝试创建/唤醒队友：%s | 角色：%s", name, role)
         member = self._find(name)
         # 查找队友
         if member:
             # 如果存在
             if member["status"] not in ("idle", "shutdown"):
                 # 如果正在工作中
+                logging.error("【log】错误：队友 %s 已存在且正处于 %s 状态，无法操作", name, member["status"])
                 return f"Error: '{name}' is currently {member['status']}"
                 # 返回错误
             member["status"] = "working"
             # 更新状态
             member["role"] = role
             # 更新角色
+            logging.error("【log】更新队友 %s 状态为working", name)
         else:
             # 如果不存在
             member = {"name": name, "role": role, "status": "working"}
             # 创建新队友
             self.config["members"].append(member)
             # 添加到列表
+            logging.error("【log】新建队友 %s 状态为working", name)
         self._save()
         # 保存配置
         threading.Thread(target=self._loop, args=(name, role, prompt), daemon=True).start()
@@ -907,20 +990,25 @@ class TeammateManager:
         # _set_status 方法：设置队友状态
         # 参数 name: str —— 队友名称
         # 参数 status: str —— 新状态
+        logging.info("【log】尝试更新队友%s状态为%s", name, status)
         member = self._find(name)
         # 查找队友
         if member:
             # 如果存在
             member["status"] = status
             # 更新状态
+            logging.error("【log】更新队友状态成功")
             self._save()
             # 保存
+        else:
+            logging.error("【log】更新队友状态失败")
 
     def _loop(self, name: str, role: str, prompt: str):
         # _loop 方法：队友主循环
         # 参数 name: str —— 队友名称
         # 参数 role: str —— 角色
         # 参数 prompt: str —— 初始提示词
+        logging.info("【log】队友 %s 主循环线程启动 | 角色: %s", name, role)
         team_name = self.config["team_name"]
         # 获取团队名称
         sys_prompt = (f"You are '{name}', role: {role}, team: {team_name}, at {WORKDIR}. "
@@ -953,6 +1041,7 @@ class TeammateManager:
                         # 如果是关闭请求
                         self._set_status(name, "shutdown")
                         # 更新状态
+                        logging.info("【log】队友 %s 读取信箱，接收并执行关闭请求", name)
                         return
                         # 结束线程
                     messages.append({"role": "user", "content": json.dumps(msg)})
@@ -1394,6 +1483,7 @@ def agent_loop(messages: list):
     # 参数 messages: list —— 消息历史列表
     rounds_without_todo = 0
     # rounds_without_todo：自上次使用 TodoWrite 以来的轮数
+    logging.info("【log】正式进入lead循环！！！")
     while True:
         # 无限循环
         # s06: compression pipeline
@@ -1401,9 +1491,8 @@ def agent_loop(messages: list):
         microcompact(messages)
         # 执行微压缩
         if estimate_tokens(messages) > TOKEN_THRESHOLD:
-            # 如果 token 超过阈值
-            print("[auto-compact triggered]")
             # 打印触发信息
+            logging.info("【log】触发上下文上限，自动压缩对话")
             messages[:] = auto_compact(messages)
             # 执行自动压缩
         # s08: drain background notifications
@@ -1415,15 +1504,16 @@ def agent_loop(messages: list):
             txt = "\n".join(f"[bg:{n['task_id']}] {n['status']}: {n['result']}" for n in notifs)
             # 格式化通知
             messages.append({"role": "user", "content": f"<background-results>\n{txt}\n</background-results>"})
+            logging.info("【log】追加线程通知内容到lead对话:%s", txt)
             # 追加到消息历史
         # s10: check lead inbox
         # s10：检查队长收件箱
         inbox = BUS.read_inbox("lead")
         # 读取收件箱
         if inbox:
-            # 如果有消息
-            messages.append({"role": "user", "content": f"<inbox>{json.dumps(inbox, indent=2)}</inbox>"})
-            # 追加到消息历史
+            inbox_content = f"<inbox>{json.dumps(inbox, indent=2)}</inbox>"
+            messages.append({"role": "user", "content": inbox_content})
+            logging.info("【log】追加lead收件箱内容到lead对话：%s", inbox_content)
         # LLM call
         # LLM 调用
         response = client.messages.create(
@@ -1432,9 +1522,11 @@ def agent_loop(messages: list):
         )
         # 调用 Claude API
         messages.append({"role": "assistant", "content": response.content})
+        logging.info("【log】追加信息后lead响应内容：%s", str(response.content)[:300])
         # 追加模型回复
         if response.stop_reason != "tool_use":
             # 如果没有调用工具
+            logging.info("【log】lead不再调用工具，响应结束")
             return
             # 结束循环
         # Tool execution
@@ -1454,17 +1546,16 @@ def agent_loop(messages: list):
                     manual_compress = True
                     # 标记手动压缩
                 handler = TOOL_HANDLERS.get(block.name)
+                logging.info("【log】lead调用工具：%s", block.name)
                 # 查找处理函数
                 try:
                     output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
                     # 执行工具
+                    logging.info("【log】lead调用工具结果：%s", output[:200])
                 except Exception as e:
                     # 异常
                     output = f"Error: {e}"
-                print(f"> {block.name}:")
-                # 打印工具名
-                print(str(output)[:200])
-                # 打印输出
+                    logging.error("【log】lead调用工具异常%s", str(e))
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)})
                 # 构建结果
                 if block.name == "TodoWrite":
@@ -1477,6 +1568,7 @@ def agent_loop(messages: list):
         # 更新计数器
         if TODO.has_open_items() and rounds_without_todo >= 3:
             # 如果有未完成的待办事项且超过 3 轮未更新
+            logging.info("【log】lead超过3轮未调用todo且todo不为空，新增todo提醒到lead对话")
             results.append({"type": "text", "text": "<reminder>Update your todos.</reminder>"})
             # 注入提醒
         messages.append({"role": "user", "content": results})
@@ -1485,8 +1577,7 @@ def agent_loop(messages: list):
         # s06：手动压缩
         if manual_compress:
             # 如果触发了手动压缩
-            print("[manual compact]")
-            # 打印信息
+            logging.info("【log】模型调用压缩工具，自动压缩历史对话")
             messages[:] = auto_compact(messages)
             # 执行压缩
             return
@@ -1516,7 +1607,7 @@ if __name__ == "__main__":
             # 处理 /compact 命令：手动压缩
             if history:
                 # 如果有历史记录
-                print("[manual compact via /compact]")
+                logging.info("手动压缩历史对话")
                 # 打印信息
                 history[:] = auto_compact(history)
                 # 执行压缩
@@ -1524,19 +1615,19 @@ if __name__ == "__main__":
             # 跳过本次循环
         if query.strip() == "/tasks":
             # 处理 /tasks 命令：显示所有任务
-            print(TASK_MGR.list_all())
+            logging.info("手动查看所有task:%s", TASK_MGR.list_all())
             # 打印任务列表
             continue
             # 跳过
         if query.strip() == "/team":
             # 处理 /team 命令：显示所有队友
-            print(TEAM.list_all())
+            logging.info("手动查看所有团队成员:%s", TEAM.list_all())
             # 打印队友列表
             continue
             # 跳过
         if query.strip() == "/inbox":
             # 处理 /inbox 命令：显示队长收件箱
-            print(json.dumps(BUS.read_inbox("lead"), indent=2))
+            logging.info("手动查看队长信箱内容:%s", json.dumps(BUS.read_inbox("lead"), indent=2))
             # 打印收件箱
             continue
             # 跳过
@@ -1552,7 +1643,7 @@ if __name__ == "__main__":
                 # 遍历每个块
                 if hasattr(block, "text"):
                     # 如果有 text 属性
-                    print(block.text)
+                    logging.info("程序结束，模型最后响应:%s", block.text)
                     # 打印文本
         print()
         # 打印空行
