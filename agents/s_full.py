@@ -81,6 +81,21 @@ from anthropic import Anthropic
 from dotenv import load_dotenv
 # 从 python-dotenv 导入 load_dotenv：加载 .env 文件中的环境变量
 
+import logging
+# 导入日志
+
+Path("logs").mkdir(exist_ok=True)
+# 日志配置（输出到文件+控制台）
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.FileHandler("logs/run.log", encoding="utf-8"),  # 写入文件
+        logging.StreamHandler()  # 控制台输出
+    ]
+)
+
 load_dotenv(override=True)
 # 加载环境变量，override=True 覆盖已存在的变量
 
@@ -89,13 +104,16 @@ if os.getenv("ANTHROPIC_BASE_URL"):
     os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
     # 如果设置了，移除认证令牌
 
+
 WORKDIR = Path.cwd()
+logging.info("【log】当前工作目录为：%s", WORKDIR)
 # 设置工作目录为当前目录
 
 client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
 # 创建 Anthropic API 客户端
 
 MODEL = os.environ["MODEL_ID"]
+logging.info("【log】调用模型：%s", MODEL)
 # 从环境变量读取模型 ID
 
 # 配置各种目录路径
@@ -134,25 +152,31 @@ def safe_path(p: str) -> Path:
     # safe_path 函数：安全检查文件路径，防止路径遍历攻击
     # 参数 p: str —— 用户提供的相对路径字符串
     # 返回值 -> Path —— 经过安全检查的绝对路径
+    logging.info("【log】检查路径合法性")
     path = (WORKDIR / p).resolve()
     # 将相对路径转换为绝对路径：
     # - WORKDIR / p：使用 Path 的 / 运算符拼接工作目录和用户路径
     # - .resolve()：解析为绝对路径，消除 .. 和 . 等符号
     if not path.is_relative_to(WORKDIR):
         # 检查解析后的路径是否仍相对于 WORKDIR
+        logging.error("【log】非法绝对路径：%s", path)
         raise ValueError(f"Path escapes workspace: {p}")
         # 路径逃逸则抛出 ValueError
+    logging.info("【log】合法绝对路径：%s", path)
     return path
     # 返回安全的绝对路径
 
 def run_bash(command: str) -> str:
+    logging.info("【log】开始执行bash命令：%s", command)
     # run_bash 函数：执行 bash 命令
     # 参数 command: str —— 要执行的 shell 命令字符串
     # 返回值 -> str —— 命令执行的输出结果
     dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
     # 危险命令黑名单
-    if any(d in command for d in dangerous):
-        # 检查命令中是否包含任何危险关键词
+    dangerous_found = next((d for d in dangerous if d in command), None)
+    # 检查命令中是否包含任何危险关键词
+    if dangerous_found:
+        logging.error("【log】执行bash失败，包含危险关键词：%s", dangerous_found)
         return "Error: Dangerous command blocked"
     try:
         r = subprocess.run(command, shell=True, cwd=WORKDIR,
@@ -165,10 +189,13 @@ def run_bash(command: str) -> str:
         # - timeout=120：120 秒超时
         out = (r.stdout + r.stderr).strip()
         # 合并 stdout 和 stderr，去除首尾空白
-        return out[:50000] if out else "(no output)"
+        display_out = out[:50000] if out else "无结果"
+        logging.info("【log】bash命令执行结果：%s", display_out)
+        return display_out
         # 返回输出（限制 50000 字符）
     except subprocess.TimeoutExpired:
         # 超时异常
+        logging.error("【log】执行bash失败，超时")
         return "Error: Timeout (120s)"
 
 def run_read(path: str, limit: int = None) -> str:
@@ -176,6 +203,8 @@ def run_read(path: str, limit: int = None) -> str:
     # 参数 path: str —— 文件路径
     # 参数 limit: int = None —— 可选行数限制
     # 返回值 -> str —— 文件内容
+    limit_info = limit if limit is not None else "无限制"
+    logging.info("【log】开始读取文件：%s，行数限制：%s", path, limit_info)
     try:
         lines = safe_path(path).read_text().splitlines()
         # 安全读取文件并按行分割
@@ -183,10 +212,12 @@ def run_read(path: str, limit: int = None) -> str:
             # 如果超出限制
             lines = lines[:limit] + [f"... ({len(lines) - limit} more)"]
             # 截取并添加省略提示
+        logging.info("【log】文件行数：%s，超过行数限制：%s，截取部分文件", len(lines), limit_info)
         return "\n".join(lines)[:50000]
         # 返回内容
     except Exception as e:
         # 异常
+        logging.error("【log】文件读取异常")
         return f"Error: {e}"
 
 def run_write(path: str, content: str) -> str:
@@ -194,6 +225,7 @@ def run_write(path: str, content: str) -> str:
     # 参数 path: str —— 文件路径
     # 参数 content: str —— 文件内容
     # 返回值 -> str —— 操作结果
+    logging.info("【log】开始写入文件：%s", path)
     try:
         fp = safe_path(path)
         # 获取安全路径
@@ -201,10 +233,12 @@ def run_write(path: str, content: str) -> str:
         # 创建父目录
         fp.write_text(content)
         # 写入内容
+        logging.info("【log】成功写入文件")
         return f"Wrote {len(content)} bytes to {path}"
         # 返回成功信息
     except Exception as e:
         # 异常
+        logging.error("【log】文件写入异常")
         return f"Error: {e}"
 
 def run_edit(path: str, old_text: str, new_text: str) -> str:
@@ -213,21 +247,25 @@ def run_edit(path: str, old_text: str, new_text: str) -> str:
     # 参数 old_text: str —— 要替换的文本
     # 参数 new_text: str —— 新文本
     # 返回值 -> str —— 操作结果
+    logging.info("【log】开始替换文本：%s", path)
     try:
         fp = safe_path(path)
         # 获取安全路径
         c = fp.read_text()
         # 读取内容
         if old_text not in c:
+            logging.error("【log】替换失败，无原始文本")
             # 如果原始文本不存在
             return f"Error: Text not found in {path}"
             # 返回错误
         fp.write_text(c.replace(old_text, new_text, 1))
         # 替换文本（只替换第一次出现）
+        logging.info("【log】替换成功，只替换匹配的首个文本")
         return f"Edited {path}"
         # 返回成功信息
     except Exception as e:
         # 异常
+        logging.error("【log】替换文本异常")
         return f"Error: {e}"
 
 
@@ -237,6 +275,7 @@ class TodoManager:
     # TodoManager 类：管理待办事项列表
     def __init__(self):
         # 构造函数
+        logging.info("【log】初始化待办列表")
         self.items = []
         # 待办事项列表
 
@@ -245,6 +284,7 @@ class TodoManager:
         # 参数 items: list —— 模型传入的新待办事项列表
         # 返回值 -> str —— 渲染后的待办事项列表
         validated, ip = [], 0
+        logging.info("【log】更新待办任务")
         # validated：验证通过的列表，ip：进行中计数
         for i, item in enumerate(items):
             # 遍历每个待办事项
@@ -254,20 +294,29 @@ class TodoManager:
             # 提取状态
             af = str(item.get("activeForm", "")).strip()
             # 提取 activeForm（进行中的描述）
-            if not content: raise ValueError(f"Item {i}: content required")
+            if not content:
+                logging.error("【log】部分待办任务无内容")
+                raise ValueError(f"Item {i}: content required")
             # 内容不能为空
             if status not in ("pending", "in_progress", "completed"):
+                logging.error("【log】部分待办任务状态异常")
                 raise ValueError(f"Item {i}: invalid status '{status}'")
             # 状态必须有效
-            if not af: raise ValueError(f"Item {i}: activeForm required")
+            if not af:
+                logging.error("【log】部分待办任务进行描述为空")
+                raise ValueError(f"Item {i}: activeForm required")
             # activeForm 不能为空
             if status == "in_progress": ip += 1
             # 如果在进行中，计数
             validated.append({"content": content, "status": status, "activeForm": af})
             # 添加到验证列表
-        if len(validated) > 20: raise ValueError("Max 20 todos")
+        if len(validated) > 20:
+            logging.error("【log】待办任务数量超限")
+            raise ValueError("Max 20 todos")
         # 最多 20 个待办事项
-        if ip > 1: raise ValueError("Only one in_progress allowed")
+        if ip > 1:
+            logging.error("【log】进行中任务超限")
+            raise ValueError("Only one in_progress allowed")
         # 只能有一个进行中的任务
         self.items = validated
         # 保存验证后的列表
@@ -277,10 +326,13 @@ class TodoManager:
     def render(self) -> str:
         # render 方法：渲染待办事项列表
         # 返回值 -> str —— 格式化字符串
-        if not self.items: return "No todos."
+        if not self.items:
+            logging.info("【log】当前无待办任务")
+            return "No todos."
         # 空列表
         lines = []
         # 输出行列表
+        logging.info("【log】当前待办任务如下：")
         for item in self.items:
             m = {"completed": "[x]", "in_progress": "[>]", "pending": "[ ]"}.get(item["status"], "[?]")
             # 根据状态选择标记
@@ -291,8 +343,11 @@ class TodoManager:
         done = sum(1 for t in self.items if t["status"] == "completed")
         # 统计已完成数量
         lines.append(f"\n({done}/{len(self.items)} completed)")
+        logging.info("【log】待办任务进度：%s/%s 已完成", done, len(self.items))
         # 添加进度统计
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        logging.info("【log】更新后待办任务状态：\n%s", result)
+        return result
         # 返回格式化字符串
 
     def has_open_items(self) -> bool:
@@ -330,6 +385,7 @@ def run_subagent(prompt: str, agent_type: str = "Explore") -> str:
         "write_file": lambda **kw: run_write(kw["path"], kw["content"]),
         "edit_file": lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"]),
     }
+    logging.info("【log】启动子agent，类型：%s", agent_type)
     # 子智能体的工具处理函数
     sub_msgs = [{"role": "user", "content": prompt}]
     # 子智能体的消息历史，从空开始（上下文隔离）
@@ -340,9 +396,11 @@ def run_subagent(prompt: str, agent_type: str = "Explore") -> str:
         resp = client.messages.create(model=MODEL, messages=sub_msgs, tools=sub_tools, max_tokens=8000)
         # 调用 Claude API
         sub_msgs.append({"role": "assistant", "content": resp.content})
+        logging.info("【log】子agent响应内容：%s", resp.content)
         # 追加模型回复
         if resp.stop_reason != "tool_use":
             # 如果没有调用工具
+            logging.info("【log】子agent不再调用工具，响应结束")
             break
             # 跳出循环
         results = []
@@ -352,6 +410,7 @@ def run_subagent(prompt: str, agent_type: str = "Explore") -> str:
             if b.type == "tool_use":
                 # 如果是工具调用
                 h = sub_handlers.get(b.name, lambda **kw: "Unknown tool")
+                logging.info("【log】子agent调用工具%s：", b.name)
                 # 查找处理函数
                 results.append({"type": "tool_result", "tool_use_id": b.id, "content": str(h(**b.input))[:50000]})
                 # 执行工具并构建结果
@@ -1155,57 +1214,176 @@ TOOL_HANDLERS = {
 }
 
 TOOLS = [
-    # 可用工具列表（25 个工具）
-    {"name": "bash", "description": "Run a shell command.",
-     "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
-    {"name": "read_file", "description": "Read file contents.",
-     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["path"]}},
-    {"name": "write_file", "description": "Write content to file.",
-     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
-    {"name": "edit_file", "description": "Replace exact text in file.",
-     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]}},
-    {"name": "TodoWrite", "description": "Update task tracking list.",
-     "input_schema": {"type": "object", "properties": {"items": {"type": "array", "items": {"type": "object", "properties": {"content": {"type": "string"}, "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]}, "activeForm": {"type": "string"}}, "required": ["content", "status", "activeForm"]}}, "required": ["items"]}},
-    # TodoWrite 工具定义
-    {"name": "task", "description": "Spawn a subagent for isolated exploration or work.",
-     "input_schema": {"type": "object", "properties": {"prompt": {"type": "string"}, "agent_type": {"type": "string", "enum": ["Explore", "general-purpose"]}}, "required": ["prompt"]}},
-    # task 工具定义
-    {"name": "load_skill", "description": "Load specialized knowledge by name.",
-     "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
-    {"name": "compress", "description": "Manually compress conversation context.",
-     "input_schema": {"type": "object", "properties": {}}},
-    {"name": "background_run", "description": "Run command in background thread.",
-     "input_schema": {"type": "object", "properties": {"command": {"type": "string"}, "timeout": {"type": "integer"}}, "required": ["command"]}},
-    {"name": "check_background", "description": "Check background task status.",
-     "input_schema": {"type": "object", "properties": {"task_id": {"type": "string"}}}},
-    {"name": "task_create", "description": "Create a persistent file task.",
-     "input_schema": {"type": "object", "properties": {"subject": {"type": "string"}, "description": {"type": "string"}}, "required": ["subject"]}},
-    {"name": "task_get", "description": "Get task details by ID.",
-     "input_schema": {"type": "object", "properties": {"task_id": {"type": "integer"}}, "required": ["task_id"]}},
-    {"name": "task_update", "description": "Update task status or dependencies.",
-     "input_schema": {"type": "object", "properties": {"task_id": {"type": "integer"}, "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "deleted"]}, "add_blocked_by": {"type": "array", "items": {"type": "integer"}}, "remove_blocked_by": {"type": "array", "items": {"type": "integer"}}}, "required": ["task_id"]}},
-    {"name": "task_list", "description": "List all tasks.",
-     "input_schema": {"type": "object", "properties": {}}},
-    {"name": "spawn_teammate", "description": "Spawn a persistent autonomous teammate.",
-     "input_schema": {"type": "object", "properties": {"name": {"type": "string"}, "role": {"type": "string"}, "prompt": {"type": "string"}}, "required": ["name", "role", "prompt"]}},
-    {"name": "list_teammates", "description": "List all teammates.",
-     "input_schema": {"type": "object", "properties": {}}},
-    {"name": "send_message", "description": "Send a message to a teammate.",
-     "input_schema": {"type": "object", "properties": {"to": {"type": "string"}, "content": {"type": "string"}, "msg_type": {"type": "string", "enum": list(VALID_MSG_TYPES)}}, "required": ["to", "content"]}},
-    {"name": "read_inbox", "description": "Read and drain the lead's inbox.",
-     "input_schema": {"type": "object", "properties": {}}},
-    {"name": "broadcast", "description": "Send message to all teammates.",
-     "input_schema": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]}},
-    {"name": "shutdown_request", "description": "Request a teammate to shut down.",
-     "input_schema": {"type": "object", "properties": {"teammate": {"type": "string"}}, "required": ["teammate"]}},
-    {"name": "shutdown_response", "description": "Check shutdown request status.",
-     "input_schema": {"type": "object", "properties": {"request_id": {"type": "string"}}, "required": ["request_id"]}},
-    {"name": "plan_approval", "description": "Approve or reject a teammate's plan.",
-     "input_schema": {"type": "object", "properties": {"request_id": {"type": "string"}, "approve": {"type": "boolean"}, "feedback": {"type": "string"}}, "required": ["request_id", "approve"]}},
-    {"name": "idle", "description": "Enter idle state.",
-     "input_schema": {"type": "object", "properties": {}}},
-    {"name": "claim_task", "description": "Claim a task from the board.",
-     "input_schema": {"type": "object", "properties": {"task_id": {"type": "integer"}}, "required": ["task_id"]}},
+    {
+        "name": "bash",
+        "description": "Run a shell command in the current workspace (blocking).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+        },
+    },
+    {
+        "name": "read_file",
+        "description": "Read file contents.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "limit": {"type": "integer"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "write_file",
+        "description": "Write content to file.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["path", "content"],
+        },
+    },
+    {
+        "name": "edit_file",
+        "description": "Replace exact text in file.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "old_text": {"type": "string"},
+                "new_text": {"type": "string"},
+            },
+            "required": ["path", "old_text", "new_text"],
+        },
+    },
+    {
+        "name": "task_create",
+        "description": "Create a new task on the shared task board.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string"},
+                "description": {"type": "string"},
+            },
+            "required": ["subject"],
+        },
+    },
+    {
+        "name": "task_list",
+        "description": "List all tasks with status, owner, and worktree binding.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "task_get",
+        "description": "Get task details by ID.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"task_id": {"type": "integer"}},
+            "required": ["task_id"],
+        },
+    },
+    {
+        "name": "task_update",
+        "description": "Update task status or owner.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer"},
+                "status": {
+                    "type": "string",
+                    "enum": ["pending", "in_progress", "completed"],
+                },
+                "owner": {"type": "string"},
+            },
+            "required": ["task_id"],
+        },
+    },
+    {
+        "name": "task_bind_worktree",
+        "description": "Bind a task to a worktree name.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer"},
+                "worktree": {"type": "string"},
+                "owner": {"type": "string"},
+            },
+            "required": ["task_id", "worktree"],
+        },
+    },
+    {
+        "name": "worktree_create",
+        "description": "Create a git worktree and optionally bind it to a task.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "task_id": {"type": "integer"},
+                "base_ref": {"type": "string"},
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "worktree_list",
+        "description": "List worktrees tracked in .worktrees/index.json.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "worktree_status",
+        "description": "Show git status for one worktree.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "worktree_run",
+        "description": "Run a shell command in a named worktree directory.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "command": {"type": "string"},
+            },
+            "required": ["name", "command"],
+        },
+    },
+    {
+        "name": "worktree_remove",
+        "description": "Remove a worktree and optionally mark its bound task completed.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "force": {"type": "boolean"},
+                "complete_task": {"type": "boolean"},
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "worktree_keep",
+        "description": "Mark a worktree as kept in lifecycle state without removing it.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "worktree_events",
+        "description": "List recent worktree/task lifecycle events from .worktrees/events.jsonl.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"limit": {"type": "integer"}},
+        },
+    },
 ]
 
 
